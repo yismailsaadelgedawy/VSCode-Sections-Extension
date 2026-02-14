@@ -1,0 +1,26 @@
+AGENTS.md
+
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+coverage/
+.vscode-test/
+
+# Packaging artifacts
+*.vsix
+*.tgz
+
+# Generated test artifacts
+test-files/build/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*.tmp
+*.log

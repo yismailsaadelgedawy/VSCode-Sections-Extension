@@ -1,0 +1,7 @@
+%% Plain: First section
+line 1
+line 2
+
+%% Plain: Second section
+line 3
+line 4

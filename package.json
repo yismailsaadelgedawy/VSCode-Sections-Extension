@@ -1,0 +1,52 @@
+{
+  "name": "matlab-style-sections",
+  "displayName": "MATLAB Style Sections",
+  "description": "MATLAB-like %% sections with dividers, folding, and emphasized titles across languages.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.86.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "MATLAB Style Sections",
+      "properties": {
+        "matlabSections.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable %% section rendering and folding."
+        },
+        "matlabSections.decorateHeader": {
+          "type": "boolean",
+          "default": true,
+          "description": "Render section header line text with stronger style."
+        },
+        "matlabSections.showDivider": {
+          "type": "boolean",
+          "default": true,
+          "description": "Render a horizontal divider under each %% section header."
+        },
+        "matlabSections.indentAware": {
+          "type": "boolean",
+          "default": true,
+          "description": "Only fold lines that are indented at least as much as the section header."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.86.0",
+    "typescript": "^5.3.3"
+  }
+}
