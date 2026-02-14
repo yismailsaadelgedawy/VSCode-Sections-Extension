@@ -4,6 +4,15 @@
   "description": "MATLAB-like %% sections with dividers, folding, and emphasized titles across languages.",
   "version": "0.0.1",
   "publisher": "local",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yismailsaadelgedawy/VSCode-Sections-Extension.git"
+  },
+  "homepage": "https://github.com/yismailsaadelgedawy/VSCode-Sections-Extension",
+  "bugs": {
+    "url": "https://github.com/yismailsaadelgedawy/VSCode-Sections-Extension/issues"
+  },
   "engines": {
     "vscode": "^1.86.0"
   },
