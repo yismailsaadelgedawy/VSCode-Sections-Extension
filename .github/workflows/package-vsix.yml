@@ -16,6 +16,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Read extension version
+        id: meta
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -29,11 +33,11 @@ jobs:
         run: npm run compile
 
       - name: Package VSIX
-        run: npx @vscode/vsce package
+        run: npx @vscode/vsce package --out "matlab-style-sections-${{ steps.meta.outputs.version }}-${{ github.run_number }}.vsix"
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vscode-extension-vsix
+          name: vscode-extension-vsix-${{ steps.meta.outputs.version }}-${{ github.run_number }}
           path: '*.vsix'
           if-no-files-found: error
