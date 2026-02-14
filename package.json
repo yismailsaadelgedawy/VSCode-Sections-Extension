@@ -2,7 +2,7 @@
   "name": "matlab-style-sections",
   "displayName": "MATLAB Style Sections",
   "description": "MATLAB-like %% sections with dividers, folding, and emphasized titles across languages.",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "publisher": "YoussefElgedawy",
   "icon": "icon.png",
   "license": "MIT",
