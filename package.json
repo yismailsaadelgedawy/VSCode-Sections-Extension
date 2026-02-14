@@ -4,6 +4,7 @@
   "description": "MATLAB-like %% sections with dividers, folding, and emphasized titles across languages.",
   "version": "0.0.1",
   "publisher": "YoussefElgedawy",
+  "icon": "icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
