@@ -31,3 +31,17 @@ Any line that looks like a comment plus `%%` is treated as a section header, for
 - `matlabSections.decorateHeader` (default: `true`)
 - `matlabSections.showDivider` (default: `true`)
 - `matlabSections.indentAware` (default: `true`)
+
+## Showcase
+
+### C/C++ Sections
+
+<img src="showcase_images/cpp.png" alt="C/C++ sections" width="700" />
+
+### C/C++ Hierarchy
+
+<img src="showcase_images/cpp_heirarchy.png" alt="C/C++ hierarchy" width="700" />
+
+### Verilog Sections
+
+<img src="showcase_images/Verilog.png" alt="Verilog sections" width="700" />

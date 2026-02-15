@@ -1,4 +1,3 @@
-
 module verilog_sections;
   // %% Registers
   reg clk;
@@ -7,7 +6,7 @@ module verilog_sections;
   // %% Clock
   initial begin
     clk = 0;
-    forever #5 clk = ~clk;
+    #5 clk = ~clk;
   end
 
   // %% Counter behaviour
