@@ -1,6 +1,6 @@
 # MATLAB Style Sections (VS Code)
 
-Provides MATLAB-like section headers using `%%` across languages.
+Provides MATLAB-like section headers using `%%` across many languages.
 
 ## Supported header styles
 
@@ -38,10 +38,30 @@ Any line that looks like a comment plus `%%` is treated as a section header, for
 
 <img src="showcase_images/cpp.png" alt="C/C++ sections" width="700" />
 
-### C/C++ Hierarchy
+### Hierarchy
 
 <img src="showcase_images/cpp_heirarchy.png" alt="C/C++ hierarchy" width="700" />
 
 ### Verilog Sections
 
 <img src="showcase_images/Verilog.png" alt="Verilog sections" width="700" />
+
+### Python Sections
+
+<img src="showcase_images/Python.png" alt="Python sections" width="700" />
+
+### SQL Sections
+
+<img src="showcase_images/SQL.png" alt="SQL sections" width="700" />
+
+### JavaScript Sections
+
+<img src="showcase_images/JS.png" alt="JavaScript sections" width="700" />
+
+### INI Sections
+
+<img src="showcase_images/INI.png" alt="INI sections" width="700" />
+
+### Even Plain Text!
+
+<img src="showcase_images/TXT.png" alt="Plain text sections" width="700" />
