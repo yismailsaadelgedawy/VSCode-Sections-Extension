@@ -195,9 +195,11 @@ class SectionController
       .get<boolean>('showDivider', true);
 
     const boldRanges: vscode.DecorationOptions[] = [];
-    const dividerRanges: vscode.Range[] = [];
-    const activeDividerRanges: vscode.Range[] = [];
-    const activeLines = new Set<number>();
+    const dividerLineNumbers = new Set<number>();
+    const activeDividerLineNumbers = new Set<number>();
+    const implicitEndLines = showDivider
+      ? this.computeImplicitSectionEndLines(editor.document, sections)
+      : new Map<number, number>();
 
     if (showDivider && editor === vscode.window.activeTextEditor) {
       const cursorLine = editor.selection.active.line;
@@ -206,9 +208,13 @@ class SectionController
       );
 
       if (activeIndex >= 0) {
-        activeLines.add(sections[activeIndex].headerLine);
+        activeDividerLineNumbers.add(sections[activeIndex].headerLine);
+        const implicitEndLine = implicitEndLines.get(sections[activeIndex].headerLine);
+        if (implicitEndLine !== undefined) {
+          activeDividerLineNumbers.add(implicitEndLine);
+        }
         if (activeIndex + 1 < sections.length) {
-          activeLines.add(sections[activeIndex + 1].headerLine);
+          activeDividerLineNumbers.add(sections[activeIndex + 1].headerLine);
         }
       }
     }
@@ -224,18 +230,80 @@ class SectionController
       }
 
       if (showDivider) {
-        const lineRange = editor.document.lineAt(section.headerLine).range;
-        if (activeLines.has(section.headerLine)) {
-          activeDividerRanges.push(lineRange);
+        if (activeDividerLineNumbers.has(section.headerLine)) {
+          activeDividerLineNumbers.add(section.headerLine);
         } else {
-          dividerRanges.push(lineRange);
+          dividerLineNumbers.add(section.headerLine);
+        }
+
+        const implicitEndLine = implicitEndLines.get(section.headerLine);
+        if (implicitEndLine !== undefined) {
+          if (activeDividerLineNumbers.has(implicitEndLine)) {
+            activeDividerLineNumbers.add(implicitEndLine);
+          } else {
+            dividerLineNumbers.add(implicitEndLine);
+          }
         }
       }
     }
 
+    for (const lineNumber of activeDividerLineNumbers) {
+      dividerLineNumbers.delete(lineNumber);
+    }
+
+    const dividerRanges = [...dividerLineNumbers].map((lineNumber) => editor.document.lineAt(lineNumber).range);
+    const activeDividerRanges = [...activeDividerLineNumbers].map((lineNumber) =>
+      editor.document.lineAt(lineNumber).range
+    );
+
     editor.setDecorations(this.boldHeaderDecoration, boldRanges);
     editor.setDecorations(this.dividerDecoration, dividerRanges);
     editor.setDecorations(this.activeDividerDecoration, activeDividerRanges);
+  }
+
+  private computeImplicitSectionEndLines(
+    document: vscode.TextDocument,
+    sections: Section[]
+  ): Map<number, number> {
+    if (sections.length === 0 || document.lineCount === 0) {
+      return new Map<number, number>();
+    }
+
+    const containers = this.detectContainerSymbols(document)
+      .filter((symbol) => symbol.range.end.line > symbol.range.start.line)
+      .sort((a, b) => {
+        const spanA = a.range.end.line - a.range.start.line;
+        const spanB = b.range.end.line - b.range.start.line;
+        return spanA - spanB;
+      });
+
+    const implicitEnds = new Map<number, number>();
+    if (containers.length === 0) {
+      return implicitEnds;
+    }
+
+    for (let i = 0; i < sections.length; i += 1) {
+      const section = sections[i];
+      const container = containers.find(
+        (candidate) =>
+          section.headerLine >= candidate.range.start.line && section.headerLine < candidate.range.end.line
+      );
+      if (!container) {
+        continue;
+      }
+
+      const nextSection = sections[i + 1];
+      if (nextSection && nextSection.headerLine <= container.range.end.line) {
+        continue;
+      }
+
+      const endLine = container.range.end.line;
+      if (endLine > section.headerLine && endLine < document.lineCount) {
+        implicitEnds.set(section.headerLine, endLine);
+      }
+    }
+
+    return implicitEnds;
   }
 
   private getSections(document: vscode.TextDocument): Section[] {
