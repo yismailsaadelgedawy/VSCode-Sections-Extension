@@ -24,6 +24,8 @@ Any line that looks like a comment plus `%%` is treated as a section header, for
 - Extensive container detection supported for:
 - C/C++
 - Verilog
+- Limits expensive parsing in very large files to keep the editor responsive.
+- Optional performance tracing is available through the `MATLAB Style Sections` output channel.
 
 ## Settings
 
@@ -31,6 +33,8 @@ Any line that looks like a comment plus `%%` is treated as a section header, for
 - `matlabSections.decorateHeader` (default: `true`)
 - `matlabSections.showDivider` (default: `true`)
 - `matlabSections.indentAware` (default: `true`)
+- `matlabSections.maxLineCount` (default: `20000`)
+- `matlabSections.tracePerformance` (default: `false`)
 
 ## Showcase
 

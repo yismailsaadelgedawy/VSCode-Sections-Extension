@@ -14,21 +14,54 @@ type Section = {
 };
 
 const SECTION_RE = /^\s*(?:\/\/|#|;|--|\/\*+|\*|<!--)?\s*%%(?:\s+(.*?))?\s*(?:\*\/|-->)?\s*$/;
+const SECTION_LANGUAGE_IDS = [
+  'c',
+  'cpp',
+  'cuda-cpp',
+  'html',
+  'ini',
+  'javascript',
+  'javascriptreact',
+  'makefile',
+  'objective-c',
+  'objective-cpp',
+  'plaintext',
+  'python',
+  'shellscript',
+  'sql',
+  'systemverilog',
+  'toml',
+  'typescript',
+  'typescriptreact',
+  'verilog',
+  'xml',
+  'yaml'
+];
+const CONTAINER_SYMBOL_LANGUAGE_IDS = new Set([
+  'c',
+  'cpp',
+  'cuda-cpp',
+  'objective-c',
+  'objective-cpp',
+  'systemverilog',
+  'verilog'
+]);
+
+function supportedDocumentSelector(): vscode.DocumentSelector {
+  return SECTION_LANGUAGE_IDS.flatMap((language) => [
+    { scheme: 'file', language },
+    { scheme: 'untitled', language }
+  ]);
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   const controller = new SectionController();
+  const documentSelector = supportedDocumentSelector();
 
   context.subscriptions.push(
     controller,
-    vscode.languages.registerFoldingRangeProvider(
-      [{ scheme: 'file' }, { scheme: 'untitled' }],
-      controller
-    ),
-    vscode.languages.registerDocumentSymbolProvider(
-      [{ scheme: 'file' }, { scheme: 'untitled' }],
-      controller,
-      { label: 'Sections' }
-    ),
+    vscode.languages.registerFoldingRangeProvider(documentSelector, controller),
+    vscode.languages.registerDocumentSymbolProvider(documentSelector, controller, { label: 'Sections' }),
     vscode.window.onDidChangeActiveTextEditor(() => controller.refreshActiveEditor()),
     vscode.window.onDidChangeVisibleTextEditors(() => controller.scheduleRefreshAllVisibleEditors()),
     vscode.window.onDidChangeTextEditorSelection((event) => controller.onSelectionChanged(event)),
@@ -53,6 +86,7 @@ class SectionController
 {
   private static readonly DECORATION_DEBOUNCE_MS = 50;
   private static readonly REFRESH_DEBOUNCE_MS = 75;
+  private static readonly SLOW_OPERATION_MS = 75;
 
   private readonly boldHeaderDecoration = vscode.window.createTextEditorDecorationType({
     fontWeight: '700',
@@ -81,6 +115,7 @@ class SectionController
     }
   });
 
+  private readonly outputChannel = vscode.window.createOutputChannel('MATLAB Style Sections');
   private readonly sectionsByDoc = new Map<string, Section[]>();
   private readonly containersByDoc = new Map<string, vscode.DocumentSymbol[]>();
   private readonly decorationTimers = new Map<string, unknown>();
@@ -100,6 +135,7 @@ class SectionController
     this.boldHeaderDecoration.dispose();
     this.dividerDecoration.dispose();
     this.activeDividerDecoration.dispose();
+    this.outputChannel.dispose();
     this.sectionsByDoc.clear();
     this.containersByDoc.clear();
   }
@@ -109,61 +145,65 @@ class SectionController
     _context: vscode.FoldingContext,
     _token: vscode.CancellationToken
   ): vscode.ProviderResult<vscode.FoldingRange[]> {
-    if (!this.isEnabled() || this.isExcludedFile(document)) {
+    if (!this.canProcessDocument(document)) {
       return undefined;
     }
 
-    const sections = this.getSections(document);
-    const sectionRanges = sections
-      .filter((section) => section.foldEnd > section.headerLine)
-      .map(
-        (section) =>
-          new vscode.FoldingRange(
-            section.headerLine,
-            section.foldEnd,
-            vscode.FoldingRangeKind.Region
-          )
-      );
+    return this.measureDocumentOperation(document, 'provideFoldingRanges', () => {
+      const sections = this.getSections(document);
+      const sectionRanges = sections
+        .filter((section) => section.foldEnd > section.headerLine)
+        .map(
+          (section) =>
+            new vscode.FoldingRange(
+              section.headerLine,
+              section.foldEnd,
+              vscode.FoldingRangeKind.Region
+            )
+        );
 
-    const indentRanges = this.computeIndentationFolds(document);
-    return this.mergeFoldingRanges(sectionRanges, indentRanges);
+      const indentRanges = this.computeIndentationFolds(document);
+      return this.mergeFoldingRanges(sectionRanges, indentRanges);
+    });
   }
 
   provideDocumentSymbols(
     document: vscode.TextDocument,
     _token: vscode.CancellationToken
   ): vscode.ProviderResult<vscode.DocumentSymbol[]> {
-    if (!this.isEnabled() || this.isExcludedFile(document)) {
+    if (!this.canProcessDocument(document)) {
       return undefined;
     }
 
-    const sections = this.getSections(document);
-    const containers = this.getContainerSymbols(document);
-    if (document.lineCount === 0) {
-      return containers.length > 0 ? containers : undefined;
-    }
+    return this.measureDocumentOperation(document, 'provideDocumentSymbols', () => {
+      const sections = this.getSections(document);
+      const containers = this.getContainerSymbols(document);
+      if (document.lineCount === 0) {
+        return containers.length > 0 ? containers : undefined;
+      }
 
-    const sectionSymbols = sections.map((section) => {
-      const endLine = Math.min(section.foldEnd, document.lineCount - 1);
-      const endChar = document.lineAt(endLine).text.length;
-      const range = new vscode.Range(section.headerLine, 0, endLine, endChar);
-      const selectionRange = new vscode.Range(
-        section.headerLine,
-        section.titleStart,
-        section.headerLine,
-        section.titleEnd
-      );
-      return new vscode.DocumentSymbol(
-        section.title,
-        '',
-        vscode.SymbolKind.Object,
-        range,
-        selectionRange
-      );
+      const sectionSymbols = sections.map((section) => {
+        const endLine = Math.min(section.foldEnd, document.lineCount - 1);
+        const endChar = document.lineAt(endLine).text.length;
+        const range = new vscode.Range(section.headerLine, 0, endLine, endChar);
+        const selectionRange = new vscode.Range(
+          section.headerLine,
+          section.titleStart,
+          section.headerLine,
+          section.titleEnd
+        );
+        return new vscode.DocumentSymbol(
+          section.title,
+          '',
+          vscode.SymbolKind.Object,
+          range,
+          selectionRange
+        );
+      });
+
+      const merged = this.buildHierarchy([...containers, ...sectionSymbols]);
+      return merged.length > 0 ? merged : undefined;
     });
-
-    const merged = this.buildHierarchy([...containers, ...sectionSymbols]);
-    return merged.length > 0 ? merged : undefined;
   }
 
   onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
@@ -178,6 +218,11 @@ class SectionController
   clearCache(uri: string): void {
     this.sectionsByDoc.delete(uri);
     this.containersByDoc.delete(uri);
+    const timer = this.decorationTimers.get(uri);
+    if (timer) {
+      clearTimeout(timer);
+      this.decorationTimers.delete(uri);
+    }
   }
 
   onSelectionChanged(event: vscode.TextEditorSelectionChangeEvent): void {
@@ -194,8 +239,7 @@ class SectionController
   }
 
   refreshAllVisibleEditors(): void {
-    this.sectionsByDoc.clear();
-    this.containersByDoc.clear();
+    this.pruneCachesToOpenDocuments();
     for (const editor of vscode.window.visibleTextEditors) {
       this.applyDecorations(editor);
     }
@@ -228,86 +272,88 @@ class SectionController
   }
 
   private applyDecorations(editor: vscode.TextEditor): void {
-    if (!this.isEnabled() || this.isExcludedFile(editor.document)) {
+    if (!this.canProcessDocument(editor.document)) {
       editor.setDecorations(this.boldHeaderDecoration, []);
       editor.setDecorations(this.dividerDecoration, []);
       editor.setDecorations(this.activeDividerDecoration, []);
       return;
     }
 
-    const sections = this.getSections(editor.document);
-    const enableHeaderStyle = vscode.workspace
-      .getConfiguration('matlabSections')
-      .get<boolean>('decorateHeader', true);
-    const showDivider = vscode.workspace
-      .getConfiguration('matlabSections')
-      .get<boolean>('showDivider', true);
+    this.measureDocumentOperation(editor.document, 'applyDecorations', () => {
+      const sections = this.getSections(editor.document);
+      const enableHeaderStyle = vscode.workspace
+        .getConfiguration('matlabSections')
+        .get<boolean>('decorateHeader', true);
+      const showDivider = vscode.workspace
+        .getConfiguration('matlabSections')
+        .get<boolean>('showDivider', true);
 
-    const boldRanges: vscode.DecorationOptions[] = [];
-    const dividerLineNumbers = new Set<number>();
-    const activeDividerLineNumbers = new Set<number>();
-    const implicitEndLines = showDivider
-      ? this.computeImplicitSectionEndLines(editor.document, sections)
-      : new Map<number, number>();
+      const boldRanges: vscode.DecorationOptions[] = [];
+      const dividerLineNumbers = new Set<number>();
+      const activeDividerLineNumbers = new Set<number>();
+      const implicitEndLines = showDivider
+        ? this.computeImplicitSectionEndLines(editor.document, sections)
+        : new Map<number, number>();
 
-    if (showDivider && editor === vscode.window.activeTextEditor) {
-      const cursorLine = editor.selection.active.line;
-      const activeIndex = sections.findIndex(
-        (section) => cursorLine >= section.headerLine && cursorLine <= section.foldEnd
-      );
+      if (showDivider && editor === vscode.window.activeTextEditor) {
+        const cursorLine = editor.selection.active.line;
+        const activeIndex = sections.findIndex(
+          (section) => cursorLine >= section.headerLine && cursorLine <= section.foldEnd
+        );
 
-      if (activeIndex >= 0) {
-        activeDividerLineNumbers.add(sections[activeIndex].headerLine);
-        const implicitEndLine = implicitEndLines.get(sections[activeIndex].headerLine);
-        if (implicitEndLine !== undefined) {
-          activeDividerLineNumbers.add(implicitEndLine);
-        }
-        if (activeIndex + 1 < sections.length) {
-          activeDividerLineNumbers.add(sections[activeIndex + 1].headerLine);
-        }
-      }
-    }
-
-    for (const section of sections) {
-      if (enableHeaderStyle) {
-        boldRanges.push({
-          range: new vscode.Range(
-            new vscode.Position(section.headerLine, section.titleStart),
-            new vscode.Position(section.headerLine, section.titleEnd)
-          )
-        });
-      }
-
-      if (showDivider) {
-        if (activeDividerLineNumbers.has(section.headerLine)) {
-          activeDividerLineNumbers.add(section.headerLine);
-        } else {
-          dividerLineNumbers.add(section.headerLine);
-        }
-
-        const implicitEndLine = implicitEndLines.get(section.headerLine);
-        if (implicitEndLine !== undefined) {
-          if (activeDividerLineNumbers.has(implicitEndLine)) {
+        if (activeIndex >= 0) {
+          activeDividerLineNumbers.add(sections[activeIndex].headerLine);
+          const implicitEndLine = implicitEndLines.get(sections[activeIndex].headerLine);
+          if (implicitEndLine !== undefined) {
             activeDividerLineNumbers.add(implicitEndLine);
-          } else {
-            dividerLineNumbers.add(implicitEndLine);
+          }
+          if (activeIndex + 1 < sections.length) {
+            activeDividerLineNumbers.add(sections[activeIndex + 1].headerLine);
           }
         }
       }
-    }
 
-    for (const lineNumber of activeDividerLineNumbers) {
-      dividerLineNumbers.delete(lineNumber);
-    }
+      for (const section of sections) {
+        if (enableHeaderStyle) {
+          boldRanges.push({
+            range: new vscode.Range(
+              new vscode.Position(section.headerLine, section.titleStart),
+              new vscode.Position(section.headerLine, section.titleEnd)
+            )
+          });
+        }
 
-    const dividerRanges = [...dividerLineNumbers].map((lineNumber) => editor.document.lineAt(lineNumber).range);
-    const activeDividerRanges = [...activeDividerLineNumbers].map((lineNumber) =>
-      editor.document.lineAt(lineNumber).range
-    );
+        if (showDivider) {
+          if (activeDividerLineNumbers.has(section.headerLine)) {
+            activeDividerLineNumbers.add(section.headerLine);
+          } else {
+            dividerLineNumbers.add(section.headerLine);
+          }
 
-    editor.setDecorations(this.boldHeaderDecoration, boldRanges);
-    editor.setDecorations(this.dividerDecoration, dividerRanges);
-    editor.setDecorations(this.activeDividerDecoration, activeDividerRanges);
+          const implicitEndLine = implicitEndLines.get(section.headerLine);
+          if (implicitEndLine !== undefined) {
+            if (activeDividerLineNumbers.has(implicitEndLine)) {
+              activeDividerLineNumbers.add(implicitEndLine);
+            } else {
+              dividerLineNumbers.add(implicitEndLine);
+            }
+          }
+        }
+      }
+
+      for (const lineNumber of activeDividerLineNumbers) {
+        dividerLineNumbers.delete(lineNumber);
+      }
+
+      const dividerRanges = [...dividerLineNumbers].map((lineNumber) => editor.document.lineAt(lineNumber).range);
+      const activeDividerRanges = [...activeDividerLineNumbers].map((lineNumber) =>
+        editor.document.lineAt(lineNumber).range
+      );
+
+      editor.setDecorations(this.boldHeaderDecoration, boldRanges);
+      editor.setDecorations(this.dividerDecoration, dividerRanges);
+      editor.setDecorations(this.activeDividerDecoration, activeDividerRanges);
+    });
   }
 
   private computeImplicitSectionEndLines(
@@ -368,6 +414,10 @@ class SectionController
   }
 
   private getContainerSymbols(document: vscode.TextDocument): vscode.DocumentSymbol[] {
+    if (!CONTAINER_SYMBOL_LANGUAGE_IDS.has(document.languageId)) {
+      return [];
+    }
+
     const key = document.uri.toString();
     const cached = this.containersByDoc.get(key);
     if (cached) {
@@ -377,6 +427,67 @@ class SectionController
     const containers = this.detectContainerSymbols(document);
     this.containersByDoc.set(key, containers);
     return containers;
+  }
+
+  private canProcessDocument(document: vscode.TextDocument): boolean {
+    if (!this.isEnabled() || this.isExcludedFile(document)) {
+      return false;
+    }
+
+    const maxLineCount = vscode.workspace
+      .getConfiguration('matlabSections')
+      .get<number>('maxLineCount', 20000);
+    if (document.lineCount > maxLineCount) {
+      this.log(
+        `Skipping ${this.describeDocument(document)} because it exceeds maxLineCount (${document.lineCount} > ${maxLineCount}).`
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  private pruneCachesToOpenDocuments(): void {
+    const openUris = new Set(vscode.workspace.textDocuments.map((document) => document.uri.toString()));
+    for (const uri of [...this.sectionsByDoc.keys()]) {
+      if (!openUris.has(uri)) {
+        this.sectionsByDoc.delete(uri);
+      }
+    }
+
+    for (const uri of [...this.containersByDoc.keys()]) {
+      if (!openUris.has(uri)) {
+        this.containersByDoc.delete(uri);
+      }
+    }
+  }
+
+  private measureDocumentOperation<T>(
+    document: vscode.TextDocument,
+    operation: string,
+    fn: () => T
+  ): T {
+    const start = Date.now();
+    const result = fn();
+    const elapsed = Date.now() - start;
+    if (this.shouldTracePerformance() || elapsed >= SectionController.SLOW_OPERATION_MS) {
+      this.log(`${operation} took ${elapsed}ms for ${this.describeDocument(document)}.`);
+    }
+    return result;
+  }
+
+  private shouldTracePerformance(): boolean {
+    return vscode.workspace
+      .getConfiguration('matlabSections')
+      .get<boolean>('tracePerformance', false);
+  }
+
+  private describeDocument(document: vscode.TextDocument): string {
+    return `${document.languageId}:${document.uri.fsPath || document.uri.toString()}`;
+  }
+
+  private log(message: string): void {
+    this.outputChannel.appendLine(`[${new Date().toISOString()}] ${message}`);
   }
 
   private parseSections(document: vscode.TextDocument): Section[] {

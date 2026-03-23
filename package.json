@@ -2,7 +2,7 @@
   "name": "matlab-style-sections",
   "displayName": "MATLAB Style Sections",
   "description": "MATLAB-like %% sections with dividers, folding, and emphasized titles across languages.",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "publisher": "YoussefElgedawy",
   "icon": "icon.png",
   "license": "MIT",
@@ -47,6 +47,17 @@
           "type": "boolean",
           "default": true,
           "description": "Only fold lines that are indented at least as much as the section header."
+        },
+        "matlabSections.maxLineCount": {
+          "type": "number",
+          "default": 20000,
+          "minimum": 1,
+          "description": "Skip section parsing for very large files above this line count."
+        },
+        "matlabSections.tracePerformance": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write performance diagnostics to the MATLAB Style Sections output channel."
         }
       }
     }
