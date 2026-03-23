@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 
+declare function setTimeout(handler: (...args: unknown[]) => void, timeout?: number): unknown;
+declare function clearTimeout(handle: unknown): void;
+
 type Section = {
   headerLine: number;
   headerIndent: number;
@@ -26,18 +29,19 @@ export function activate(context: vscode.ExtensionContext): void {
       controller,
       { label: 'Sections' }
     ),
-    vscode.window.onDidChangeActiveTextEditor(() => controller.refreshAllVisibleEditors()),
+    vscode.window.onDidChangeActiveTextEditor(() => controller.refreshActiveEditor()),
+    vscode.window.onDidChangeVisibleTextEditors(() => controller.scheduleRefreshAllVisibleEditors()),
     vscode.window.onDidChangeTextEditorSelection((event) => controller.onSelectionChanged(event)),
     vscode.workspace.onDidChangeTextDocument((event) => controller.onDocumentChanged(event)),
     vscode.workspace.onDidCloseTextDocument((doc) => controller.clearCache(doc.uri.toString())),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('matlabSections')) {
-        controller.refreshAllVisibleEditors();
+        controller.scheduleRefreshAllVisibleEditors();
       }
     })
   );
 
-  controller.refreshAllVisibleEditors();
+  controller.scheduleRefreshAllVisibleEditors();
 }
 
 export function deactivate(): void {
@@ -47,6 +51,9 @@ export function deactivate(): void {
 class SectionController
   implements vscode.Disposable, vscode.FoldingRangeProvider, vscode.DocumentSymbolProvider
 {
+  private static readonly DECORATION_DEBOUNCE_MS = 50;
+  private static readonly REFRESH_DEBOUNCE_MS = 75;
+
   private readonly boldHeaderDecoration = vscode.window.createTextEditorDecorationType({
     fontWeight: '700',
     letterSpacing: '0.1px'
@@ -75,12 +82,26 @@ class SectionController
   });
 
   private readonly sectionsByDoc = new Map<string, Section[]>();
+  private readonly containersByDoc = new Map<string, vscode.DocumentSymbol[]>();
+  private readonly decorationTimers = new Map<string, unknown>();
+  private refreshTimer: unknown;
 
   dispose(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+
+    for (const timer of this.decorationTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.decorationTimers.clear();
+
     this.boldHeaderDecoration.dispose();
     this.dividerDecoration.dispose();
     this.activeDividerDecoration.dispose();
     this.sectionsByDoc.clear();
+    this.containersByDoc.clear();
   }
 
   provideFoldingRanges(
@@ -117,7 +138,7 @@ class SectionController
     }
 
     const sections = this.getSections(document);
-    const containers = this.detectContainerSymbols(document);
+    const containers = this.getContainerSymbols(document);
     if (document.lineCount === 0) {
       return containers.length > 0 ? containers : undefined;
     }
@@ -146,36 +167,64 @@ class SectionController
   }
 
   onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
-    this.sectionsByDoc.delete(event.document.uri.toString());
+    this.clearCache(event.document.uri.toString());
     for (const editor of vscode.window.visibleTextEditors) {
       if (editor.document.uri.toString() === event.document.uri.toString()) {
-        this.applyDecorations(editor);
+        this.scheduleApplyDecorations(editor);
       }
     }
   }
 
   clearCache(uri: string): void {
     this.sectionsByDoc.delete(uri);
+    this.containersByDoc.delete(uri);
   }
 
   onSelectionChanged(event: vscode.TextEditorSelectionChangeEvent): void {
     if (event.textEditor === vscode.window.activeTextEditor) {
-      this.applyDecorations(event.textEditor);
+      this.scheduleApplyDecorations(event.textEditor);
     }
   }
 
   refreshActiveEditor(): void {
     const editor = vscode.window.activeTextEditor;
     if (editor) {
-      this.applyDecorations(editor);
+      this.scheduleApplyDecorations(editor);
     }
   }
 
   refreshAllVisibleEditors(): void {
     this.sectionsByDoc.clear();
+    this.containersByDoc.clear();
     for (const editor of vscode.window.visibleTextEditors) {
       this.applyDecorations(editor);
     }
+  }
+
+  scheduleRefreshAllVisibleEditors(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      this.refreshAllVisibleEditors();
+    }, SectionController.REFRESH_DEBOUNCE_MS);
+  }
+
+  private scheduleApplyDecorations(editor: vscode.TextEditor): void {
+    const key = editor.document.uri.toString();
+    const existing = this.decorationTimers.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+
+    const timer = setTimeout(() => {
+      this.decorationTimers.delete(key);
+      this.applyDecorations(editor);
+    }, SectionController.DECORATION_DEBOUNCE_MS);
+
+    this.decorationTimers.set(key, timer);
   }
 
   private applyDecorations(editor: vscode.TextEditor): void {
@@ -269,7 +318,7 @@ class SectionController
       return new Map<number, number>();
     }
 
-    const containers = this.detectContainerSymbols(document)
+    const containers = this.getContainerSymbols(document)
       .filter((symbol) => symbol.range.end.line > symbol.range.start.line)
       .sort((a, b) => {
         const spanA = a.range.end.line - a.range.start.line;
@@ -316,6 +365,18 @@ class SectionController
     const sections = this.parseSections(document);
     this.sectionsByDoc.set(key, sections);
     return sections;
+  }
+
+  private getContainerSymbols(document: vscode.TextDocument): vscode.DocumentSymbol[] {
+    const key = document.uri.toString();
+    const cached = this.containersByDoc.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const containers = this.detectContainerSymbols(document);
+    this.containersByDoc.set(key, containers);
+    return containers;
   }
 
   private parseSections(document: vscode.TextDocument): Section[] {
@@ -815,6 +876,8 @@ class SectionController
   private computeIndentationFolds(document: vscode.TextDocument): vscode.FoldingRange[] {
     const ranges: vscode.FoldingRange[] = [];
     const stack: Array<{ line: number; indent: number }> = [];
+    let previousNonEmptyLine = -1;
+    let previousIndent = 0;
 
     for (let lineNumber = 0; lineNumber < document.lineCount; lineNumber += 1) {
       const text = document.lineAt(lineNumber).text;
@@ -836,15 +899,12 @@ class SectionController
         }
       }
 
-      const nextNonEmpty = this.findNextNonEmptyLine(document, lineNumber + 1);
-      if (nextNonEmpty < 0) {
-        continue;
+      if (previousNonEmptyLine >= 0 && indent > previousIndent) {
+        stack.push({ line: previousNonEmptyLine, indent: previousIndent });
       }
 
-      const nextIndent = this.leadingWhitespace(document.lineAt(nextNonEmpty).text);
-      if (nextIndent > indent) {
-        stack.push({ line: lineNumber, indent });
-      }
+      previousNonEmptyLine = lineNumber;
+      previousIndent = indent;
     }
 
     const lastLine = document.lineCount - 1;
