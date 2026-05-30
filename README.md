@@ -12,6 +12,8 @@ Any line that looks like a comment plus `%%` is treated as a section header, for
 - `-- %% Section Title`
 - `; %% Section Title`
 
+Basic `// %%` section headers work in Swift and Kotlin files.
+
 ## Features
 
 - Renders a horizontal divider on section header lines across languages.
